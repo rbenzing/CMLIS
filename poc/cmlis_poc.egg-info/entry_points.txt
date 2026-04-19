@@ -1,0 +1,2 @@
+[console_scripts]
+cmlis = cmlis.cli:main

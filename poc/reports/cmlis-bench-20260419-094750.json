@@ -1,0 +1,439 @@
+{
+  "topology_summary": "System: Windows\nSockets: 1  Physical cores: 10  Logical: 12\nTotal memory: 15811 MB\nL3 cache: unknown\nNUMA nodes: 1 (simulated)\n  node 0: 12 cpus, 15811 MB\nnote: NUMA tools unavailable on Windows; treating machine as single simulated node.",
+  "results": [
+    {
+      "config": "naive",
+      "workload": "short",
+      "rep": 0,
+      "tokens_per_second": 6.958222305926508,
+      "wall_seconds": 36.79100620024138,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "naive",
+      "workload": "short",
+      "rep": 1,
+      "tokens_per_second": 6.384086282486867,
+      "wall_seconds": 40.09970866187563,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "naive",
+      "workload": "short",
+      "rep": 2,
+      "tokens_per_second": 6.73760603262767,
+      "wall_seconds": 37.995691460778374,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "naive",
+      "workload": "short",
+      "rep": 3,
+      "tokens_per_second": 6.607026958443999,
+      "wall_seconds": 38.746625616961275,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "naive",
+      "workload": "short",
+      "rep": 4,
+      "tokens_per_second": 7.1959901470503524,
+      "wall_seconds": 35.5753683327283,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "numa",
+      "workload": "short",
+      "rep": 0,
+      "tokens_per_second": 6.958222305926508,
+      "wall_seconds": 36.79100620024138,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "numa",
+      "workload": "short",
+      "rep": 1,
+      "tokens_per_second": 6.384086282486867,
+      "wall_seconds": 40.09970866187563,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "numa",
+      "workload": "short",
+      "rep": 2,
+      "tokens_per_second": 6.73760603262767,
+      "wall_seconds": 37.995691460778374,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "numa",
+      "workload": "short",
+      "rep": 3,
+      "tokens_per_second": 6.607026958443999,
+      "wall_seconds": 38.746625616961275,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "numa",
+      "workload": "short",
+      "rep": 4,
+      "tokens_per_second": 7.1959901470503524,
+      "wall_seconds": 35.5753683327283,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "full",
+      "workload": "short",
+      "rep": 0,
+      "tokens_per_second": 7.620910144586174,
+      "wall_seconds": 33.59178826978561,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "full",
+      "workload": "short",
+      "rep": 1,
+      "tokens_per_second": 6.992094499866568,
+      "wall_seconds": 36.612777473886446,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "full",
+      "workload": "short",
+      "rep": 2,
+      "tokens_per_second": 7.379282797639828,
+      "wall_seconds": 34.69171829027591,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "full",
+      "workload": "short",
+      "rep": 3,
+      "tokens_per_second": 7.236267621152951,
+      "wall_seconds": 35.37735382418204,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "full",
+      "workload": "short",
+      "rep": 4,
+      "tokens_per_second": 7.881322542007529,
+      "wall_seconds": 32.48185804292584,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "naive",
+      "workload": "medium",
+      "rep": 0,
+      "tokens_per_second": 4.496082105367898,
+      "wall_seconds": 113.87692395312806,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "naive",
+      "workload": "medium",
+      "rep": 1,
+      "tokens_per_second": 4.125101905606899,
+      "wall_seconds": 124.11814585818647,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "naive",
+      "workload": "medium",
+      "rep": 2,
+      "tokens_per_second": 4.353530051851725,
+      "wall_seconds": 117.60571166431401,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "naive",
+      "workload": "medium",
+      "rep": 3,
+      "tokens_per_second": 4.269155880840738,
+      "wall_seconds": 119.93003167154681,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "naive",
+      "workload": "medium",
+      "rep": 4,
+      "tokens_per_second": 4.6497167104017665,
+      "wall_seconds": 110.1142353155876,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "numa",
+      "workload": "medium",
+      "rep": 0,
+      "tokens_per_second": 4.496082105367898,
+      "wall_seconds": 113.87692395312806,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "numa",
+      "workload": "medium",
+      "rep": 1,
+      "tokens_per_second": 4.125101905606899,
+      "wall_seconds": 124.11814585818647,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "numa",
+      "workload": "medium",
+      "rep": 2,
+      "tokens_per_second": 4.353530051851725,
+      "wall_seconds": 117.60571166431401,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "numa",
+      "workload": "medium",
+      "rep": 3,
+      "tokens_per_second": 4.269155880840738,
+      "wall_seconds": 119.93003167154681,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "numa",
+      "workload": "medium",
+      "rep": 4,
+      "tokens_per_second": 4.6497167104017665,
+      "wall_seconds": 110.1142353155876,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "full",
+      "workload": "medium",
+      "rep": 0,
+      "tokens_per_second": 4.496082105367898,
+      "wall_seconds": 113.87692395312806,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "full",
+      "workload": "medium",
+      "rep": 1,
+      "tokens_per_second": 4.125101905606899,
+      "wall_seconds": 124.11814585818647,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "full",
+      "workload": "medium",
+      "rep": 2,
+      "tokens_per_second": 4.353530051851725,
+      "wall_seconds": 117.60571166431401,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "full",
+      "workload": "medium",
+      "rep": 3,
+      "tokens_per_second": 4.269155880840738,
+      "wall_seconds": 119.93003167154681,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    },
+    {
+      "config": "full",
+      "workload": "medium",
+      "rep": 4,
+      "tokens_per_second": 4.6497167104017665,
+      "wall_seconds": 110.1142353155876,
+      "simulated": true,
+      "remote_numa_fraction": null,
+      "command": [
+        "<simulated>"
+      ]
+    }
+  ],
+  "stats": [
+    {
+      "config": "naive",
+      "workload": "short",
+      "n": 5,
+      "mean_tps": 6.776586345307079,
+      "stdev_tps": 0.3135352136804942,
+      "min_tps": 6.384086282486867,
+      "max_tps": 7.1959901470503524
+    },
+    {
+      "config": "numa",
+      "workload": "short",
+      "n": 5,
+      "mean_tps": 6.776586345307079,
+      "stdev_tps": 0.3135352136804942,
+      "min_tps": 6.384086282486867,
+      "max_tps": 7.1959901470503524
+    },
+    {
+      "config": "full",
+      "workload": "short",
+      "n": 5,
+      "mean_tps": 7.42197552105061,
+      "stdev_tps": 0.3433957102214934,
+      "min_tps": 6.992094499866568,
+      "max_tps": 7.881322542007529
+    },
+    {
+      "config": "naive",
+      "workload": "medium",
+      "n": 5,
+      "mean_tps": 4.378717330813805,
+      "stdev_tps": 0.2025919842243194,
+      "min_tps": 4.125101905606899,
+      "max_tps": 4.6497167104017665
+    },
+    {
+      "config": "numa",
+      "workload": "medium",
+      "n": 5,
+      "mean_tps": 4.378717330813805,
+      "stdev_tps": 0.2025919842243194,
+      "min_tps": 4.125101905606899,
+      "max_tps": 4.6497167104017665
+    },
+    {
+      "config": "full",
+      "workload": "medium",
+      "n": 5,
+      "mean_tps": 4.378717330813805,
+      "stdev_tps": 0.2025919842243194,
+      "min_tps": 4.125101905606899,
+      "max_tps": 4.6497167104017665
+    }
+  ],
+  "significance": {
+    "short": {
+      "uplift_pct": 9.52,
+      "t": 3.104,
+      "p": 0.0019,
+      "df": 7,
+      "meets_25pct": false,
+      "significant_p01": true
+    },
+    "medium": {
+      "uplift_pct": 0.0,
+      "t": 0.0,
+      "p": 1.0,
+      "df": 8,
+      "meets_25pct": false,
+      "significant_p01": false
+    }
+  }
+}

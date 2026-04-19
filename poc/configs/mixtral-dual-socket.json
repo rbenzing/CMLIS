@@ -1,0 +1,19 @@
+{
+  "description": "Reference config for Mixtral 8x7B on dual-socket EPYC",
+  "model": "/models/mixtral-8x7b-instruct.Q5_K_M.gguf",
+  "binary": "llama-cli",
+  "workloads": ["short", "medium", "long"],
+  "configs": ["naive", "numa", "full"],
+  "reps": 30,
+  "targets": {
+    "uplift_pct": 25,
+    "p_value": 0.01,
+    "absolute_floor_tps": 3.5,
+    "remote_numa_fraction_max": 0.10
+  },
+  "preflight": [
+    "echo 0 > /proc/sys/kernel/numa_balancing",
+    "echo 3 > /proc/sys/vm/drop_caches",
+    "echo 1 > /proc/sys/vm/compact_memory"
+  ]
+}

@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: cmlis-poc
+Version: 0.1.0
+Summary: CMLIS PoC: memory-aware CPU LLM inference orchestrator
+Requires-Python: >=3.10
+Requires-Dist: psutil>=5.9
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: ruff>=0.5; extra == "dev"
+Requires-Dist: scipy>=1.10; extra == "dev"
