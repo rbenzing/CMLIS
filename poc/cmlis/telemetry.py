@@ -1,9 +1,9 @@
 """Telemetry collection.
 
-Samples `numastat` (remote NUMA traffic) and basic per-CPU utilization via
-psutil. On non-Linux systems, only psutil metrics are available.
-
-Linux-only extras: `perf stat` (LLC cache misses) and `mpstat` (iowait).
+Samples NUMA locality, CPU utilization, cache behavior, and iowait around
+an inference run. On Linux, NUMA and perf sampling can be scoped to a
+specific process PID. On other systems, unavailable metrics are reported
+explicitly instead of being folded into zero values.
 """
 
 from __future__ import annotations
@@ -13,19 +13,24 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 
 @dataclass
 class TelemetrySample:
     t: float
+    pid: int | None
     cpu_percent: list[float]
     numa_local_mb: dict[int, float] = field(default_factory=dict)
     numa_remote_mb: dict[int, float] = field(default_factory=dict)
-    perf_cache_misses: int | None = None  # LLC-load-misses count
-    perf_cache_refs: int | None = None  # cache-references count
-    perf_llc_miss_rate: float | None = None  # misses/refs ratio
-    mpstat_iowait_pct: float | None = None  # mean iowait across CPUs
+    numa_scope: str = "unavailable"
+    perf_cache_misses: int | None = None
+    perf_cache_refs: int | None = None
+    perf_llc_miss_rate: float | None = None
+    mpstat_iowait_pct: float | None = None
+
+    def as_dict(self) -> dict:
+        return asdict(self)
 
 
 @dataclass
@@ -33,9 +38,11 @@ class TelemetrySummary:
     duration_s: float
     samples: int
     mean_cpu_percent: float
-    remote_numa_fraction: float | None  # None if unavailable
-    mean_llc_miss_rate: float | None = None  # mean across samples
-    peak_iowait_pct: float | None = None  # max iowait sample
+    remote_numa_fraction: float | None
+    numa_available: bool = False
+    numa_scope: str = "unavailable"
+    mean_llc_miss_rate: float | None = None
+    peak_iowait_pct: float | None = None
     perf_available: bool = False
     mpstat_available: bool = False
 
@@ -45,6 +52,8 @@ class TelemetrySummary:
             "samples": self.samples,
             "mean_cpu_percent": self.mean_cpu_percent,
             "remote_numa_fraction": self.remote_numa_fraction,
+            "numa_available": self.numa_available,
+            "numa_scope": self.numa_scope,
             "mean_llc_miss_rate": self.mean_llc_miss_rate,
             "peak_iowait_pct": self.peak_iowait_pct,
             "perf_available": self.perf_available,
@@ -56,61 +65,60 @@ def _have(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
-def _read_numastat() -> tuple[dict[int, float], dict[int, float]]:
-    """Return (local_mb_per_node, remote_mb_per_node)."""
-    if not _have("numastat"):
-        return {}, {}
+def _read_numastat(pid: int | None = None) -> tuple[dict[int, float], dict[int, float], str]:
+    """Return (local_mb_per_node, remote_mb_per_node, scope)."""
+    if sys.platform != "linux" or not _have("numastat"):
+        return {}, {}, "unavailable"
+
+    cmd = ["numastat"]
+    scope = "system"
+    if pid is not None:
+        cmd += ["-p", str(pid)]
+        scope = "process"
+
     try:
-        r = subprocess.run(["numastat"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
     except (subprocess.SubprocessError, OSError):
-        return {}, {}
+        return {}, {}, "unavailable"
 
     local: dict[int, float] = {}
     remote: dict[int, float] = {}
-    for line in r.stdout.splitlines():
+    for line in result.stdout.splitlines():
         parts = line.split()
         if not parts:
             continue
         key = parts[0]
         if key == "numa_hit":
-            for i, v in enumerate(parts[1:]):
-                local[i] = float(v)
+            for index, value in enumerate(parts[1:]):
+                local[index] = float(value)
         elif key == "numa_miss":
-            for i, v in enumerate(parts[1:]):
-                remote[i] = float(v)
-    return local, remote
+            for index, value in enumerate(parts[1:]):
+                remote[index] = float(value)
+    if not local and not remote:
+        return {}, {}, "unavailable"
+    return local, remote, scope
 
 
 def _read_perf_stat(pid: int | None) -> tuple[int | None, int | None]:
-    """Run perf stat and return (llc_load_misses, cache_references).
-
-    Linux-only. Returns (None, None) on other platforms, on permission errors,
-    or if perf is not installed.
-    """
-    if sys.platform != "linux":
-        return None, None
-    if not _have("perf"):
+    """Run perf stat and return (llc_load_misses, cache_references)."""
+    if sys.platform != "linux" or not _have("perf"):
         return None, None
     try:
         cmd = ["perf", "stat", "-e", "cache-misses,cache-references,LLC-load-misses"]
         if pid is not None:
             cmd += ["-p", str(pid)]
         cmd += ["sleep", "0.4"]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-        # perf writes its output to stderr
-        output = r.stdout + r.stderr
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        output = result.stdout + result.stderr
     except Exception:
         return None, None
 
     llc_load_misses: int | None = None
     cache_references: int | None = None
-
     for line in output.splitlines():
-        # Lines look like: "     1,234,567      cache-misses"
         parts = line.split()
         if len(parts) < 2:
             continue
-        # Strip commas from the number
         raw_num = parts[0].replace(",", "")
         try:
             count = int(raw_num)
@@ -120,7 +128,6 @@ def _read_perf_stat(pid: int | None) -> tuple[int | None, int | None]:
         if "llc-load-misses" in label or label == "llc-load-misses":
             llc_load_misses = count
         elif label in ("cache-misses", "cache-misses:u", "cache-misses:k"):
-            # Only use cache-misses if llc-load-misses is not available
             if llc_load_misses is None:
                 llc_load_misses = count
         elif "cache-references" in label:
@@ -130,60 +137,42 @@ def _read_perf_stat(pid: int | None) -> tuple[int | None, int | None]:
 
 
 def _read_mpstat() -> float | None:
-    """Run mpstat and return mean iowait% across all CPUs from the Average block.
-
-    Linux-only. Returns None on other platforms or if mpstat is not installed.
-    """
-    if sys.platform != "linux":
-        return None
-    if not _have("mpstat"):
+    """Run mpstat and return mean iowait% across all CPUs from the Average block."""
+    if sys.platform != "linux" or not _have("mpstat"):
         return None
     try:
-        r = subprocess.run(
+        result = subprocess.run(
             ["mpstat", "-P", "ALL", "1", "1"],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        output = r.stdout
+        output = result.stdout
     except Exception:
         return None
 
-    # Find the Average: section and parse %iowait column
-    lines = output.splitlines()
-
-    # Locate the header line under Average: to find column index
     iowait_col: int | None = None
     iowait_values: list[float] = []
     in_average = False
-
-    for line in lines:
+    for line in output.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-
         parts = stripped.split()
         if not parts:
             continue
-
-        # Header line contains "%iowait" — look for it near "Average:"
         if "Average:" in parts[0] and "%iowait" in stripped:
-            # This is the header row for Average block
             in_average = True
             try:
                 iowait_col = parts.index("%iowait")
             except ValueError:
                 return None
             continue
-
-        if in_average and iowait_col is not None and parts[0] == "Average:":
-            # Data rows: Average:  cpu_id  ...  %iowait  ...
-            # Skip the "all" row to get per-CPU lines, or use all rows
-            if len(parts) > iowait_col:
-                try:
-                    iowait_values.append(float(parts[iowait_col]))
-                except ValueError:
-                    continue
+        if in_average and iowait_col is not None and parts[0] == "Average:" and len(parts) > iowait_col:
+            try:
+                iowait_values.append(float(parts[iowait_col]))
+            except ValueError:
+                continue
 
     if not iowait_values:
         return None
@@ -205,7 +194,7 @@ class TelemetryCollector:
         import psutil
 
         while not self._stop.is_set():
-            local, remote = _read_numastat()
+            local, remote, numa_scope = _read_numastat(self._pid)
             llc_misses, cache_refs = _read_perf_stat(self._pid)
             iowait = _read_mpstat()
 
@@ -216,9 +205,11 @@ class TelemetryCollector:
             self.samples.append(
                 TelemetrySample(
                     t=time.perf_counter(),
+                    pid=self._pid,
                     cpu_percent=psutil.cpu_percent(interval=None, percpu=True),
                     numa_local_mb=local,
                     numa_remote_mb=remote,
+                    numa_scope=numa_scope,
                     perf_cache_misses=llc_misses,
                     perf_cache_refs=cache_refs,
                     perf_llc_miss_rate=llc_miss_rate,
@@ -227,56 +218,69 @@ class TelemetryCollector:
             )
             self._stop.wait(self.interval_s)
 
-    def start(self) -> None:
+    def start(self, pid: int | None = None) -> None:
         self.samples.clear()
         self._stop.clear()
+        self._pid = pid if pid is not None else self._pid
         self._t_start = time.perf_counter()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
     def stop(self) -> TelemetrySummary:
+        if self._thread is None:
+            return TelemetrySummary(
+                duration_s=0.0,
+                samples=0,
+                mean_cpu_percent=0.0,
+                remote_numa_fraction=None,
+                numa_available=False,
+                numa_scope="unavailable",
+                perf_available=False,
+                mpstat_available=False,
+            )
+
         self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=2.0)
+        self._thread.join(timeout=2.0)
         duration = time.perf_counter() - (self._t_start or time.perf_counter())
+        self._thread = None
 
         cpu_avg = 0.0
         if self.samples:
-            flat = [v for s in self.samples for v in s.cpu_percent]
+            flat = [value for sample in self.samples for value in sample.cpu_percent]
             cpu_avg = sum(flat) / len(flat) if flat else 0.0
 
-        remote_frac: float | None = None
-        if len(self.samples) >= 2:
-            first, last = self.samples[0], self.samples[-1]
-            if first.numa_local_mb and last.numa_local_mb:
-                d_local = sum(
-                    last.numa_local_mb.get(k, 0) - first.numa_local_mb.get(k, 0) for k in last.numa_local_mb
-                )
-                d_remote = sum(
-                    last.numa_remote_mb.get(k, 0) - first.numa_remote_mb.get(k, 0)
-                    for k in last.numa_remote_mb
-                )
-                total = d_local + d_remote
-                if total > 0:
-                    remote_frac = d_remote / total
+        numa_available = any(sample.numa_scope != "unavailable" for sample in self.samples)
+        numa_scope = "unavailable"
+        for sample in self.samples:
+            if sample.numa_scope != "unavailable":
+                numa_scope = sample.numa_scope
+                break
 
-        # LLC miss rate mean
-        miss_rates = [s.perf_llc_miss_rate for s in self.samples if s.perf_llc_miss_rate is not None]
+        remote_frac: float | None = None
+        if len(self.samples) >= 2 and numa_available:
+            first, last = self.samples[0], self.samples[-1]
+            d_local = sum(last.numa_local_mb.get(key, 0) - first.numa_local_mb.get(key, 0) for key in last.numa_local_mb)
+            d_remote = sum(last.numa_remote_mb.get(key, 0) - first.numa_remote_mb.get(key, 0) for key in last.numa_remote_mb)
+            total = d_local + d_remote
+            if total > 0:
+                remote_frac = d_remote / total
+
+        miss_rates = [sample.perf_llc_miss_rate for sample in self.samples if sample.perf_llc_miss_rate is not None]
         mean_llc_miss_rate = sum(miss_rates) / len(miss_rates) if miss_rates else None
 
-        # Peak iowait
-        iowait_vals = [s.mpstat_iowait_pct for s in self.samples if s.mpstat_iowait_pct is not None]
+        iowait_vals = [sample.mpstat_iowait_pct for sample in self.samples if sample.mpstat_iowait_pct is not None]
         peak_iowait_pct = max(iowait_vals) if iowait_vals else None
 
-        # Availability flags
-        perf_available = any(s.perf_cache_misses is not None for s in self.samples)
-        mpstat_available = any(s.mpstat_iowait_pct is not None for s in self.samples)
+        perf_available = any(sample.perf_cache_misses is not None for sample in self.samples)
+        mpstat_available = any(sample.mpstat_iowait_pct is not None for sample in self.samples)
 
         return TelemetrySummary(
             duration_s=duration,
             samples=len(self.samples),
             mean_cpu_percent=cpu_avg,
             remote_numa_fraction=remote_frac,
+            numa_available=numa_available,
+            numa_scope=numa_scope,
             mean_llc_miss_rate=mean_llc_miss_rate,
             peak_iowait_pct=peak_iowait_pct,
             perf_available=perf_available,

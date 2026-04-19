@@ -1,7 +1,9 @@
 # CMLIS-MVP: Memory-Aware CPU LLM Inference Layer
 
 **Version:** 1.3 (Systems-Rigorous & Peer-Reviewed)  
-**Status:** Active Development
+**Status:** Active Development (Research PoC)
+
+The current repository does not yet satisfy this MVP as a production-grade system. It contains a PoC harness plus supporting documents. Open remediation work is tracked in `PRODUCTION_TASKS.md`.
 
 ---
 
@@ -146,5 +148,5 @@ If successful, this MVP will empirically demonstrate that:
 **Next Steps**
 1. Document L3 cache/NUMA topology of the target hardware.
 2. Run naive + NUMA baselines on available hardware to establish statistical control.
-3. Implement Python Memory Control orchestrator.
-4. Execute full experimental suite according to `METHODOLOGY.md`.
+3. Complete the production-readiness remediation items in `PRODUCTION_TASKS.md`.
+4. Execute the full experimental suite according to `METHODOLOGY.md` after the benchmark validity gates and telemetry evidence are hardened.

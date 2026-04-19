@@ -1,15 +1,17 @@
 """Tests for ppl.py."""
 
+from pathlib import Path
+
 from cmlis import ppl
 
 
 def test_simulated_run_returns_both_configs():
     results = ppl.run_ppl(configs=["naive", "full"], simulate=True, seed=42)
     assert len(results) == 2
-    configs = {r.config for r in results}
+    configs = {result.config for result in results}
     assert configs == {"naive", "full"}
-    assert all(r.simulated for r in results)
-    assert all(r.ppl > 0 for r in results)
+    assert all(result.simulated for result in results)
+    assert all(result.ppl > 0 for result in results)
 
 
 def test_simulated_ppl_within_threshold():
@@ -60,3 +62,36 @@ def test_naive_only_run():
     results = ppl.run_ppl(configs=["naive"], simulate=True)
     assert len(results) == 1
     assert results[0].config == "naive"
+
+
+def test_real_ppl_fails_closed_when_binary_missing(monkeypatch):
+    monkeypatch.setattr(ppl.engine, "resolve_binary", lambda binary=None: None)
+    results = ppl.run_ppl(configs=["naive"], simulate=False, model_path="model.gguf")
+    assert len(results) == 1
+    assert results[0].simulated is False
+    assert results[0].exit_code == 2
+    assert "binary not found" in results[0].message
+
+
+def test_real_ppl_fails_closed_when_model_missing(monkeypatch):
+    monkeypatch.setattr(ppl.engine, "resolve_binary", lambda binary=None: "fake-binary")
+    results = ppl.run_ppl(configs=["naive"], simulate=False, model_path="missing.gguf")
+    assert len(results) == 1
+    assert results[0].simulated is False
+    assert results[0].exit_code == 2
+    assert "model not found" in results[0].message
+
+
+def test_real_ppl_fails_closed_when_dataset_unavailable(monkeypatch):
+    model_path = Path(__file__)
+    monkeypatch.setattr(ppl.engine, "resolve_binary", lambda binary=None: "fake-binary")
+
+    def fail_download():
+        raise OSError("network unavailable")
+
+    monkeypatch.setattr(ppl, "_download_wikitext2", fail_download)
+    results = ppl.run_ppl(configs=["naive"], simulate=False, model_path=str(model_path))
+    assert len(results) == 1
+    assert results[0].simulated is False
+    assert results[0].exit_code == 2
+    assert "failed to prepare WikiText-2 dataset" in results[0].message

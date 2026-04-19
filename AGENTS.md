@@ -79,10 +79,4 @@ All non-trivial tasks use this sequence (orchestrator coordinates):
 
 **Minimal fix:** researcher → developer-draft → developer-verify → code-reviewer → tester
 
-Draft+Verify: haiku drafts first, sonnet verifies. Gate failures retry with sonnet, then escalate to opus.
-
----
-
-## Project Learnings
-
-- (empty)
+Draft+Verify: lower cost model drafts first, medium cost model verifies. Gate failures retry with medium cost model, then escalate to high cost model.

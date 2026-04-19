@@ -11,6 +11,10 @@ Python orchestrator that implements the **Memory Control** and **Heuristic Routi
 5. **Collects telemetry** — `numastat`-derived remote-NUMA fraction + per-CPU utilization.
 6. **Simulates** the whole pipeline when `llama.cpp` or a GGUF model is not present, so the orchestration path can be validated on any machine.
 
+Current PoC limits:
+- Routed benchmark runs now rotate across discovered NUMA nodes, but the PoC does not yet launch one isolated runtime instance per socket.
+- `kv_cache_chunks` is currently routing metadata only; real KV cache placement is not yet implemented.
+
 ## Install
 
 ```bash

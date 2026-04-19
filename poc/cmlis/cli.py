@@ -18,6 +18,41 @@ from . import engine, memctl, router, topology
 from . import ppl as ppl_mod
 
 
+def _print_bench_report(report: bench_mod.BenchReport, path: str) -> None:
+    print(report.topology_summary)
+    if report.swap_mb_at_start > 0:
+        print(f"\nWARNING: swap in use at bench start: {report.swap_mb_at_start} MB")
+    if report.validity:
+        print(
+            "\nvalidity:"
+            f" total={report.validity['total_runs']}"
+            f" valid={report.validity['valid_runs']}"
+            f" invalid={report.validity['invalid_runs']}"
+            f" failed={report.validity['failed_runs']}"
+        )
+        for failure in report.validity.get("gate_failures", []):
+            print(f"gate failure: {failure}")
+    print()
+    print(
+        f"{'config':<8} {'workload':<10} {'n':>3} {'mean':>8} {'stdev':>7} {'cv%':>6} {'min':>7} {'max':>7} {'var_ok':>7}"
+    )
+    for stat in report.stats:
+        ok = "OK" if stat.variance_ok else "WARN"
+        print(
+            f"{stat.config:<8} {stat.workload:<10} {stat.n:>3} {stat.mean_tps:>8.2f} {stat.stdev_tps:>7.2f}"
+            f" {stat.cv_pct:>6.1f} {stat.min_tps:>7.2f} {stat.max_tps:>7.2f} {ok:>7}"
+        )
+    print()
+    print("significance (full vs naive):")
+    for workload, sig in report.significance.items():
+        marker = "PASS" if sig["meets_25pct"] and sig["significant_p01"] else "----"
+        print(
+            f"  {workload:<10} uplift {sig['uplift_pct']:>6.2f}%  t={sig['t']:+.3f}  p={sig['p']:.4f}  [{marker}]"
+        )
+    print()
+    print(f"report: {path}")
+
+
 def _cmd_topo(args: argparse.Namespace) -> int:
     t = topology.discover()
     if args.json:
@@ -30,21 +65,30 @@ def _cmd_topo(args: argparse.Namespace) -> int:
 def _cmd_plan(args: argparse.Namespace) -> int:
     t = topology.discover()
     cores = len(t.numa_nodes[0].cpus) if t.numa_nodes else (t.physical_cores or 4)
-    decision = router.decide(args.input_tokens, cores_per_node=cores, numa_node=args.numa_node)
+    decision = router.decide(
+        args.input_tokens,
+        cores_per_node=cores,
+        numa_nodes=max(1, len(t.numa_nodes)),
+        route_index=args.numa_node,
+    )
     node = t.numa_nodes[decision.prefer_numa_node] if t.numa_nodes else None
     binding = memctl.build_binding(
         decision.prefer_numa_node,
         node.cpus if node else [],
     )
+    binding_validation = router.validate_binding(decision, binding, t)
     out = {
         "workload": decision.workload.value,
         "rationale": decision.rationale,
+        "routing_notes": decision.notes,
         "active_experts": decision.active_experts,
         "kv_cache_chunks": decision.kv_cache_chunks,
+        "prefer_numa_node": decision.prefer_numa_node,
         "threads": decision.threads,
         "binding_enforced": binding.enforced,
         "binding_prefix": binding.prefix,
         "binding_notes": binding.notes,
+        "binding_validation": binding_validation,
         "llama_flags": decision.as_flags(),
     }
     print(json.dumps(out, indent=2))
@@ -54,9 +98,15 @@ def _cmd_plan(args: argparse.Namespace) -> int:
 def _cmd_run(args: argparse.Namespace) -> int:
     t = topology.discover()
     cores = len(t.numa_nodes[0].cpus) if t.numa_nodes else (t.physical_cores or 4)
-    decision = router.decide(args.input_tokens, cores_per_node=cores, numa_node=0)
-    node = t.numa_nodes[0] if t.numa_nodes else None
-    binding = memctl.build_binding(0, node.cpus if node else [])
+    decision = router.decide(
+        args.input_tokens,
+        cores_per_node=cores,
+        numa_nodes=max(1, len(t.numa_nodes)),
+        route_index=args.route_index,
+    )
+    node = t.numa_nodes[decision.prefer_numa_node] if t.numa_nodes else None
+    binding = memctl.build_binding(decision.prefer_numa_node, node.cpus if node else [])
+    binding_validation = router.validate_binding(decision, binding, t)
     result = engine.run(
         decision,
         binding,
@@ -68,6 +118,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
         seed=args.seed,
     )
     out = {
+        "mode": "simulated" if result.simulated else "real",
+        "message": result.message,
+        "routing_notes": decision.notes,
+        "prefer_numa_node": decision.prefer_numa_node,
+        "binding_validation": binding_validation,
         "simulated": result.simulated,
         "command": result.command,
         "exit_code": result.exit_code,
@@ -82,39 +137,29 @@ def _cmd_run(args: argparse.Namespace) -> int:
 def _cmd_bench(args: argparse.Namespace) -> int:
     workloads = args.workloads.split(",") if args.workloads else ["short", "medium"]
     configs = args.configs.split(",") if args.configs else list(bench_mod.CONFIGS)
-    report = bench_mod.run_bench(
-        workloads=workloads,
-        configs=configs,
-        reps=args.reps,
-        model_path=args.model,
-        binary=args.binary,
-        simulate=args.simulate,
-        collect_telemetry=not args.no_telemetry,
-        seed=args.seed,
-    )
+    strict = args.strict or not args.simulate
+    try:
+        report = bench_mod.run_bench(
+            workloads=workloads,
+            configs=configs,
+            reps=args.reps,
+            model_path=args.model,
+            binary=args.binary,
+            simulate=args.simulate,
+            collect_telemetry=not args.no_telemetry,
+            seed=args.seed,
+            strict=strict,
+            allow_invalid=args.allow_invalid,
+        )
+    except bench_mod.BenchValidationError as exc:
+        path = bench_mod.save_report(exc.report, args.out)
+        _print_bench_report(exc.report, str(path))
+        return 1
+
     path = bench_mod.save_report(report, args.out)
-    print(report.topology_summary)
-    if report.swap_mb_at_start > 0:
-        print(f"\nWARNING: swap in use at bench start: {report.swap_mb_at_start} MB")
-    print()
-    print(
-        f"{'config':<8} {'workload':<10} {'n':>3} {'mean':>8} {'stdev':>7} {'cv%':>6} {'min':>7} {'max':>7} {'var_ok':>7}"
-    )
-    for s in report.stats:
-        ok = "OK" if s.variance_ok else "WARN"
-        print(
-            f"{s.config:<8} {s.workload:<10} {s.n:>3} {s.mean_tps:>8.2f} {s.stdev_tps:>7.2f}"
-            f" {s.cv_pct:>6.1f} {s.min_tps:>7.2f} {s.max_tps:>7.2f} {ok:>7}"
-        )
-    print()
-    print("significance (full vs naive):")
-    for wl, sig in report.significance.items():
-        marker = "PASS" if sig["meets_25pct"] and sig["significant_p01"] else "----"
-        print(
-            f"  {wl:<10} uplift {sig['uplift_pct']:>6.2f}%  t={sig['t']:+.3f}  p={sig['p']:.4f}  [{marker}]"
-        )
-    print()
-    print(f"report: {path}")
+    _print_bench_report(report, str(path))
+    if strict and report.validity and not report.validity.get("passed_gates", True) and not args.allow_invalid:
+        return 1
     return 0
 
 
@@ -130,11 +175,19 @@ def _cmd_ppl(args: argparse.Namespace) -> int:
     degradation = ppl_mod.check_degradation(results)
     out = {
         "results": [
-            {"config": r.config, "ppl": r.ppl, "ppl_stderr": r.ppl_stderr, "simulated": r.simulated}
+            {
+                "config": r.config,
+                "mode": "simulated" if r.simulated else "real",
+                "message": r.message,
+                "ppl": r.ppl,
+                "ppl_stderr": r.ppl_stderr,
+                "simulated": r.simulated,
+                "exit_code": r.exit_code,
+            }
             for r in results
         ],
         "degradation": degradation,
-        "passes": all(v["passes"] for v in degradation.values()),
+        "passes": all(v["passes"] for v in degradation.values()) and all(r.exit_code == 0 for r in results),
     }
     print(json.dumps(out, indent=2))
     return 0 if out["passes"] else 1
@@ -160,6 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--model", default=None, help="path to GGUF model")
     p_run.add_argument("--binary", default=None, help="path to llama.cpp binary")
     p_run.add_argument("--simulate", action="store_true")
+    p_run.add_argument("--route-index", type=int, default=0, help="routing slot used to pick a NUMA node")
     p_run.add_argument("--seed", type=int, default=42)
     p_run.set_defaults(func=_cmd_run)
 
@@ -171,6 +225,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_bench.add_argument("--binary", default=None)
     p_bench.add_argument("--simulate", action="store_true")
     p_bench.add_argument("--no-telemetry", action="store_true")
+    p_bench.add_argument("--strict", action="store_true", help="enforce methodology validity gates")
+    p_bench.add_argument("--allow-invalid", action="store_true", help="override methodology validity gate failures")
     p_bench.add_argument("--seed", type=int, default=42)
     p_bench.add_argument("--out", default="./reports")
     p_bench.set_defaults(func=_cmd_bench)

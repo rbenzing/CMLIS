@@ -5,6 +5,8 @@ CMLIS is a CPU-first language model inference architecture designed to run large
 
 The system reframes LLM inference not as dense tensor computation, but as a **memory-conditioned process** driven by hardware topology. 
 
+Current repository status: the codebase contains a Python proof of concept for orchestration and evaluation, not a production-ready implementation of the full architecture. The remediation backlog for closing those gaps is tracked in `PRODUCTION_TASKS.md`.
+
 ## 2. Problem Statement
 Modern LLMs are optimized for GPU-based dense execution, creating severe inefficiencies on CPU architectures due to:
 - High memory bandwidth pressure (the primary bottleneck).

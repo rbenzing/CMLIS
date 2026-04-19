@@ -2,7 +2,7 @@
 
 Downloads WikiText-2 test set and runs llama.cpp --perplexity to measure
 PPL degradation relative to naive baseline. Success criterion (SPEC.md):
-degradation <= 0.1.
+degradation <= 0.1. Simulation is only used when explicitly requested.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import memctl, router, topology
+from . import engine, memctl, router, topology
 
 _WIKITEXT2_URL = (
     "https://raw.githubusercontent.com/pytorch/examples/main/word_language_model/data/wikitext-2/test.txt"
@@ -23,8 +23,6 @@ _CACHE_PATH = Path.home() / ".cache" / "cmlis" / "wikitext2-test.txt"
 
 PPL_CONFIGS = ("naive", "full")
 
-# Regex to parse llama.cpp perplexity output:
-# "Final estimate: PPL = 4.2345 +/- 0.0123"
 _PPL_RE = re.compile(r"Final estimate:\s*PPL\s*=\s*([\d.]+)\s*\+/-\s*([\d.]+)")
 
 
@@ -34,6 +32,8 @@ class PplResult:
     ppl: float
     ppl_stderr: float | None
     simulated: bool
+    exit_code: int = 0
+    message: str = ""
 
 
 def _download_wikitext2() -> Path:
@@ -53,15 +53,32 @@ def _parse_ppl(output: str) -> tuple[float, float | None]:
     return 0.0, None
 
 
-def _simulate_ppl(config: str, seed: int) -> PplResult:
+def _simulate_ppl(config: str, seed: int, reason: str = "simulation mode requested") -> PplResult:
     """Return synthetic PPL values for simulation mode."""
     rng = random.Random(seed)
     base = 4.23
-    # full is slightly worse than naive but within 0.1 threshold
     offset = 0.02 if config == "full" else 0.0
     noise = rng.uniform(-0.005, 0.005)
-    ppl = base + offset + noise
-    return PplResult(config=config, ppl=round(ppl, 4), ppl_stderr=0.01, simulated=True)
+    ppl_value = base + offset + noise
+    return PplResult(
+        config=config,
+        ppl=round(ppl_value, 4),
+        ppl_stderr=0.01,
+        simulated=True,
+        exit_code=0,
+        message=reason,
+    )
+
+
+def _error_result(config: str, message: str) -> PplResult:
+    return PplResult(
+        config=config,
+        ppl=0.0,
+        ppl_stderr=None,
+        simulated=False,
+        exit_code=2,
+        message=message,
+    )
 
 
 def _route_for_ppl(config: str, topo: topology.Topology) -> router.RoutingDecision:
@@ -77,7 +94,7 @@ def _route_for_ppl(config: str, topo: topology.Topology) -> router.RoutingDecisi
             threads=topo.physical_cores or cores_per_node,
             rationale="naive: default llama.cpp",
         )
-    return router.decide(2048, cores_per_node=cores_per_node, numa_node=0)
+    return router.decide(2048, cores_per_node=cores_per_node, numa_nodes=max(1, len(topo.numa_nodes)))
 
 
 def _plan_for_ppl(
@@ -100,32 +117,37 @@ def run_ppl(
     seed: int = 42,
     timeout: float = 3600.0,
 ) -> list[PplResult]:
-    """Run perplexity measurement for each config.
-
-    In simulation mode (or when binary/model unavailable) returns synthetic
-    PPL values. Naive ~4.23, full ~4.25 — within 0.1 threshold.
-    """
+    """Run perplexity measurement for each config."""
     if configs is None:
         configs = list(PPL_CONFIGS)
 
-    topo = topology.discover()
-    model_ok = model_path and Path(model_path).exists()
+    if simulate:
+        return [_simulate_ppl(cfg, seed) for cfg in configs]
 
+    resolved_binary = engine.resolve_binary(binary)
+    if not resolved_binary:
+        message = "llama.cpp binary not found; pass --binary, set LLAMA_CPP_BIN, or use --simulate"
+        return [_error_result(cfg, message) for cfg in configs]
+    if not model_path:
+        message = "model path is required for a real PPL run; pass --model or use --simulate"
+        return [_error_result(cfg, message) for cfg in configs]
+    if not Path(model_path).exists():
+        message = f"model not found at {model_path!r}; pass a valid --model or use --simulate"
+        return [_error_result(cfg, message) for cfg in configs]
+
+    try:
+        wikitext_path = _download_wikitext2()
+    except OSError as exc:
+        message = f"failed to prepare WikiText-2 dataset: {exc}"
+        return [_error_result(cfg, message) for cfg in configs]
+
+    topo = topology.discover()
     results: list[PplResult] = []
     for cfg in configs:
         decision = _route_for_ppl(cfg, topo)
         binding = _plan_for_ppl(cfg, decision, topo)
-
-        force_simulate = simulate or not binary or not model_ok
-        if force_simulate:
-            results.append(_simulate_ppl(cfg, seed))
-            continue
-
-        # Download dataset on demand (only when actually running)
-        wikitext_path = _download_wikitext2()
-
         cmd = list(binding.prefix) + [
-            binary,
+            resolved_binary,
             "-m",
             model_path,
             "--perplexity",
@@ -138,19 +160,32 @@ def run_ppl(
         ]
 
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-            combined = r.stdout + "\n" + r.stderr
-            ppl_val, ppl_err = _parse_ppl(combined)
+            completed = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            combined = completed.stdout + "\n" + completed.stderr
+            ppl_value, ppl_err = _parse_ppl(combined)
             results.append(
                 PplResult(
                     config=cfg,
-                    ppl=ppl_val,
+                    ppl=ppl_value,
                     ppl_stderr=ppl_err,
                     simulated=False,
+                    exit_code=completed.returncode,
+                    message="real execution completed"
+                    if completed.returncode == 0
+                    else "real execution failed",
                 )
             )
         except subprocess.TimeoutExpired:
-            results.append(PplResult(config=cfg, ppl=0.0, ppl_stderr=None, simulated=False))
+            results.append(
+                PplResult(
+                    config=cfg,
+                    ppl=0.0,
+                    ppl_stderr=None,
+                    simulated=False,
+                    exit_code=124,
+                    message=f"timeout after {timeout}s",
+                )
+            )
 
     return results
 
@@ -162,16 +197,16 @@ def check_degradation(results: list[PplResult]) -> dict[str, dict]:
     delta = config_ppl - naive_ppl; passes = delta <= 0.1.
     """
     naive_ppl: float | None = None
-    for r in results:
-        if r.config == "naive":
-            naive_ppl = r.ppl
+    for result in results:
+        if result.config == "naive":
+            naive_ppl = result.ppl
             break
 
     out: dict[str, dict] = {}
-    for r in results:
-        delta = (r.ppl - naive_ppl) if naive_ppl is not None else 0.0
-        out[r.config] = {
-            "ppl": r.ppl,
+    for result in results:
+        delta = (result.ppl - naive_ppl) if naive_ppl is not None else 0.0
+        out[result.config] = {
+            "ppl": result.ppl,
             "delta": round(delta, 6),
             "passes": delta <= 0.1,
         }

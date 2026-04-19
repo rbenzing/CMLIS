@@ -1,9 +1,8 @@
 """Inference engine wrapper.
 
 Launches `llama.cpp` (llama-cli / main binary) with the composed command
-prefix from memctl and flags from the router. If the binary or a model
-file is unavailable, runs in simulation mode that synthesises plausible
-tokens/sec numbers so the orchestration path can be exercised end to end.
+prefix from memctl and flags from the router. Simulation is only used when
+explicitly requested so that real runs fail closed on missing dependencies.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ import re
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,10 +31,15 @@ class EngineRun:
     wall_seconds: float
     tokens_generated: int
     tokens_per_second: float
+    message: str = ""
+    measurement_valid: bool = False
     pid: int | None = None  # PID of the llama.cpp process; None for simulated runs
 
 
-def _default_binary() -> str | None:
+def resolve_binary(binary: str | None = None) -> str | None:
+    """Resolve the llama.cpp binary from an explicit path or common defaults."""
+    if binary:
+        return binary if Path(binary).exists() else shutil.which(binary)
     for name in ("llama-cli", "main", "llama.cpp"):
         p = shutil.which(name)
         if p:
@@ -67,6 +72,7 @@ def _simulate(
     output_tokens: int,
     seed: int,
     config: str = "full",
+    reason: str = "simulation mode requested",
 ) -> EngineRun:
     """Generate plausible synthetic numbers for dry-run validation.
 
@@ -98,6 +104,23 @@ def _simulate(
         wall_seconds=wall,
         tokens_generated=output_tokens,
         tokens_per_second=tps,
+        message=reason,
+        measurement_valid=True,
+    )
+
+
+def _runtime_error(message: str) -> EngineRun:
+    return EngineRun(
+        simulated=False,
+        command=[],
+        stdout="",
+        stderr=message,
+        exit_code=2,
+        wall_seconds=0.0,
+        tokens_generated=0,
+        tokens_per_second=0.0,
+        message=message,
+        measurement_valid=False,
     )
 
 
@@ -113,24 +136,24 @@ def run(
     seed: int = 0,
     timeout: float = 600.0,
     config: str = "full",
+    on_start: Callable[[int], None] | None = None,
 ) -> EngineRun:
     """Run one inference job with the composed configuration."""
-    import sys
+    resolved_binary = resolve_binary(binary)
 
-    binary = binary or _default_binary()
-    model_ok = model_path and Path(model_path).exists()
-
-    if not simulate and binary and not model_ok and model_path:
-        print(
-            f"WARNING: binary found but model not found at {model_path!r}; running in simulation mode",
-            file=sys.stderr,
-        )
-
-    if simulate or not binary or not model_ok:
+    if simulate:
         return _simulate(decision, binding, output_tokens, seed, config=config)
+    if not resolved_binary:
+        return _runtime_error(
+            "llama.cpp binary not found; pass --binary, set LLAMA_CPP_BIN, or use --simulate"
+        )
+    if not model_path:
+        return _runtime_error("model path is required for a real run; pass --model or use --simulate")
+    if not Path(model_path).exists():
+        return _runtime_error(f"model not found at {model_path!r}; pass a valid --model or use --simulate")
 
     cmd = list(binding.prefix) + [
-        binary,
+        resolved_binary,
         "-m",
         model_path,
         "-p",
@@ -149,6 +172,8 @@ def run(
         # Use Popen so we can expose the PID to the telemetry collector.
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         pid = proc.pid
+        if on_start is not None:
+            on_start(pid)
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -163,13 +188,22 @@ def run(
                 wall_seconds=timeout,
                 tokens_generated=0,
                 tokens_per_second=0.0,
+                message=f"timeout after {timeout}s",
+                measurement_valid=False,
                 pid=pid,
             )
         wall = time.perf_counter() - t0
         toks, tps = _parse_tps(stdout + "\n" + stderr)
-        if toks == 0:
-            toks = output_tokens
-            tps = toks / wall if wall > 0 else 0.0
+        measurement_valid = toks > 0 and proc.returncode == 0
+        if proc.returncode != 0:
+            toks = 0
+            tps = 0.0
+            message = "real execution failed"
+        elif toks == 0:
+            tps = 0.0
+            message = "real execution missing timing output"
+        else:
+            message = "real execution completed"
         return EngineRun(
             simulated=False,
             command=cmd,
@@ -179,6 +213,8 @@ def run(
             wall_seconds=wall,
             tokens_generated=toks,
             tokens_per_second=tps,
+            message=message,
+            measurement_valid=measurement_valid,
             pid=pid,
         )
     except OSError as e:
@@ -191,5 +227,7 @@ def run(
             wall_seconds=0.0,
             tokens_generated=0,
             tokens_per_second=0.0,
+            message="real execution failed",
+            measurement_valid=False,
             pid=None,
         )
