@@ -10,7 +10,6 @@ from __future__ import annotations
 import random
 import re
 import subprocess
-import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,8 +17,7 @@ from pathlib import Path
 from . import memctl, router, topology
 
 _WIKITEXT2_URL = (
-    "https://raw.githubusercontent.com/pytorch/examples/main/"
-    "word_language_model/data/wikitext-2/test.txt"
+    "https://raw.githubusercontent.com/pytorch/examples/main/word_language_model/data/wikitext-2/test.txt"
 )
 _CACHE_PATH = Path.home() / ".cache" / "cmlis" / "wikitext2-test.txt"
 
@@ -82,10 +80,14 @@ def _route_for_ppl(config: str, topo: topology.Topology) -> router.RoutingDecisi
     return router.decide(2048, cores_per_node=cores_per_node, numa_node=0)
 
 
-def _plan_for_ppl(config: str, decision: router.RoutingDecision, topo: topology.Topology) -> memctl.BindingPlan:
+def _plan_for_ppl(
+    config: str, decision: router.RoutingDecision, topo: topology.Topology
+) -> memctl.BindingPlan:
     """Build binding plan for PPL measurement."""
     if config == "naive":
-        return memctl.BindingPlan(numa_node=0, cpus=[], enforced=False, prefix=[], notes=["naive: no binding"])
+        return memctl.BindingPlan(
+            numa_node=0, cpus=[], enforced=False, prefix=[], notes=["naive: no binding"]
+        )
     node = topo.numa_nodes[decision.prefer_numa_node % max(1, len(topo.numa_nodes))]
     return memctl.build_binding(node.node_id, node.cpus)
 
@@ -135,7 +137,6 @@ def run_ppl(
             str(seed),
         ]
 
-        t0 = time.perf_counter()
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
             combined = r.stdout + "\n" + r.stderr

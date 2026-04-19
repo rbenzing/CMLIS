@@ -236,6 +236,9 @@ def run_bench(
                     seed=seed + i,
                     config=cfg,
                 )
+                # Pass the real PID to telemetry so numastat/perf scopes to the process.
+                if tel is not None and run.pid is not None:
+                    tel._pid = run.pid
                 summary = tel.stop() if tel else None
                 report.results.append(
                     RunResult(

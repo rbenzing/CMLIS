@@ -15,6 +15,7 @@ import sys
 
 from . import bench as bench_mod
 from . import engine, memctl, router, topology
+from . import ppl as ppl_mod
 
 
 def _cmd_topo(args: argparse.Namespace) -> int:
@@ -117,6 +118,28 @@ def _cmd_bench(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ppl(args: argparse.Namespace) -> int:
+    configs = args.configs.split(",") if args.configs else list(ppl_mod.PPL_CONFIGS)
+    results = ppl_mod.run_ppl(
+        configs=configs,
+        model_path=args.model,
+        binary=args.binary,
+        simulate=args.simulate,
+        seed=args.seed,
+    )
+    degradation = ppl_mod.check_degradation(results)
+    out = {
+        "results": [
+            {"config": r.config, "ppl": r.ppl, "ppl_stderr": r.ppl_stderr, "simulated": r.simulated}
+            for r in results
+        ],
+        "degradation": degradation,
+        "passes": all(v["passes"] for v in degradation.values()),
+    }
+    print(json.dumps(out, indent=2))
+    return 0 if out["passes"] else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="cmlis", description="CMLIS PoC orchestrator")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -151,6 +174,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_bench.add_argument("--seed", type=int, default=42)
     p_bench.add_argument("--out", default="./reports")
     p_bench.set_defaults(func=_cmd_bench)
+
+    p_ppl = sub.add_parser("ppl", help="measure perplexity on WikiText-2")
+    p_ppl.add_argument("--model", default=None, help="path to GGUF model")
+    p_ppl.add_argument("--binary", default=None, help="path to llama.cpp binary")
+    p_ppl.add_argument("--simulate", action="store_true")
+    p_ppl.add_argument("--seed", type=int, default=42)
+    p_ppl.add_argument("--configs", default="naive,full", help="comma-sep configs to test")
+    p_ppl.set_defaults(func=_cmd_ppl)
 
     return p
 

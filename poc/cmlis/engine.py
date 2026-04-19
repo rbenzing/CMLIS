@@ -31,6 +31,7 @@ class EngineRun:
     wall_seconds: float
     tokens_generated: int
     tokens_per_second: float
+    pid: int | None = None  # PID of the llama.cpp process; None for simulated runs
 
 
 def _default_binary() -> str | None:
@@ -145,30 +146,50 @@ def run(
 
     t0 = time.perf_counter()
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # Use Popen so we can expose the PID to the telemetry collector.
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        pid = proc.pid
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            return EngineRun(
+                simulated=False,
+                command=cmd,
+                stdout=stdout or "",
+                stderr=f"timeout after {timeout}s",
+                exit_code=124,
+                wall_seconds=timeout,
+                tokens_generated=0,
+                tokens_per_second=0.0,
+                pid=pid,
+            )
         wall = time.perf_counter() - t0
-        toks, tps = _parse_tps(r.stdout + "\n" + r.stderr)
+        toks, tps = _parse_tps(stdout + "\n" + stderr)
         if toks == 0:
             toks = output_tokens
             tps = toks / wall if wall > 0 else 0.0
         return EngineRun(
             simulated=False,
             command=cmd,
-            stdout=r.stdout,
-            stderr=r.stderr,
-            exit_code=r.returncode,
+            stdout=stdout,
+            stderr=stderr,
+            exit_code=proc.returncode,
             wall_seconds=wall,
             tokens_generated=toks,
             tokens_per_second=tps,
+            pid=pid,
         )
-    except subprocess.TimeoutExpired as e:
+    except OSError as e:
         return EngineRun(
             simulated=False,
             command=cmd,
-            stdout=e.stdout or "",
-            stderr=f"timeout after {timeout}s",
-            exit_code=124,
-            wall_seconds=timeout,
+            stdout="",
+            stderr=str(e),
+            exit_code=1,
+            wall_seconds=0.0,
             tokens_generated=0,
             tokens_per_second=0.0,
+            pid=None,
         )

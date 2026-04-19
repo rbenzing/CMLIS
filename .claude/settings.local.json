@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /c/GIT/CPUAI/AGENTS.md /c/GIT/CPUAI/.claude/agents/*.md)",
+      "Bash(wc -c /c/GIT/CPUAI/AGENTS.md /c/GIT/CPUAI/.claude/agents/*.md)",
+      "Bash(pytest -q)",
+      "Bash(ruff check:*)",
+      "Bash(ruff format:*)"
+    ]
+  }
+}
