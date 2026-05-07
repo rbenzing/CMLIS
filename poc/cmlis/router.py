@@ -54,6 +54,15 @@ def classify(input_tokens: int) -> WorkloadClass:
     return WorkloadClass.LONG
 
 
+# Quantization types that carry high memory pressure per token.
+# For these, reduce threads by 1 extra to leave headroom for OS I/O.
+_HIGH_MEM_QUANTS = frozenset({"F32", "F16", "BF16", "Q8_0", "Q8_1", "Q8_K", "Q6_K"})
+
+# Low-precision quantizations where we can safely allow more active experts
+# on SHORT workloads (smaller working set fits more easily in L3).
+_LOW_MEM_QUANTS = frozenset({"Q2_K", "Q3_K_S", "Q3_K_M", "Q3_K_L", "IQ2_XXS", "IQ2_XS", "IQ2_S", "IQ1_S", "IQ1_M"})
+
+
 def decide(
     input_tokens: int,
     cores_per_node: int,
@@ -61,17 +70,32 @@ def decide(
     route_index: int = 0,
     mixture_of_experts: bool = True,
     kv_cache_runtime_supported: bool = False,
+    quant_type: str | None = None,
 ) -> RoutingDecision:
-    """Produce a routing decision for a single inference job."""
+    """Produce a routing decision for a single inference job.
+
+    *quant_type* (e.g. "Q5_K_M") adjusts thread count and expert limits when
+    the quantization precision is known from the GGUF metadata.
+    """
     cls = classify(input_tokens)
     threads = max(1, cores_per_node - 1)
     prefer_numa_node = route_index % max(1, numa_nodes)
     notes: list[str] = []
 
+    # Quant-aware thread adjustment
+    if quant_type and quant_type in _HIGH_MEM_QUANTS:
+        threads = max(1, threads - 1)
+        notes.append(f"high-precision quant ({quant_type}): reduced threads by 1 to leave OS memory headroom.")
+
     if cls is WorkloadClass.SHORT:
-        active = 2 if mixture_of_experts else 0
         chunks = 1
-        rationale = "short prompt: cap active experts to stay in L3"
+        # Low-precision quants have smaller per-expert footprint; allow 4 experts
+        if mixture_of_experts and quant_type and quant_type in _LOW_MEM_QUANTS:
+            active = 4
+            rationale = f"short prompt + low-precision quant ({quant_type}): allow 4 experts (smaller footprint)"
+        else:
+            active = 2 if mixture_of_experts else 0
+            rationale = "short prompt: cap active experts to stay in L3"
     elif cls is WorkloadClass.MEDIUM:
         active = 0
         chunks = 2
@@ -83,6 +107,9 @@ def decide(
 
     if chunks > 1 and not kv_cache_runtime_supported:
         notes.append("kv_cache_chunks is planning metadata only; runtime KV placement is not yet supported.")
+
+    if quant_type:
+        notes.append(f"quant: {quant_type}")
 
     return RoutingDecision(
         workload=cls,

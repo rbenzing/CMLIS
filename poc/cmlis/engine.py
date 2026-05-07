@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .gguf import GGUFError, GGUFMetadata, read_gguf_metadata, validate_gguf_path
 from .memctl import BindingPlan
 from .router import RoutingDecision, WorkloadClass
 
@@ -34,6 +35,7 @@ class EngineRun:
     message: str = ""
     measurement_valid: bool = False
     pid: int | None = None  # PID of the llama.cpp process; None for simulated runs
+    gguf_metadata: GGUFMetadata | None = None
 
 
 def resolve_binary(binary: str | None = None) -> str | None:
@@ -151,6 +153,15 @@ def run(
         return _runtime_error("model path is required for a real run; pass --model or use --simulate")
     if not Path(model_path).exists():
         return _runtime_error(f"model not found at {model_path!r}; pass a valid --model or use --simulate")
+    try:
+        validate_gguf_path(model_path)
+    except GGUFError as exc:
+        return _runtime_error(str(exc))
+    gguf_meta: GGUFMetadata | None = None
+    try:
+        gguf_meta = read_gguf_metadata(model_path)
+    except (GGUFError, Exception):
+        pass  # metadata is best-effort; don't block inference
 
     cmd = list(binding.prefix) + [
         resolved_binary,
@@ -216,6 +227,7 @@ def run(
             message=message,
             measurement_valid=measurement_valid,
             pid=pid,
+            gguf_metadata=gguf_meta,
         )
     except OSError as e:
         return EngineRun(

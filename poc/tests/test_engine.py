@@ -1,9 +1,12 @@
 """Tests for engine.py."""
 
+import struct
+
 import pytest
 
 from cmlis import engine
 from cmlis.engine import _parse_tps, _simulate
+from cmlis.gguf import GGUFError
 from cmlis.memctl import BindingPlan
 from cmlis.router import RoutingDecision, WorkloadClass
 
@@ -106,6 +109,46 @@ def test_run_fails_closed_when_model_missing(monkeypatch):
     assert result.simulated is False
     assert result.exit_code == 2
     assert "model not found" in result.message
+
+
+def test_run_fails_closed_on_invalid_gguf(monkeypatch, tmp_path):
+    """A file that exists but is not valid GGUF must fail before launching llama.cpp."""
+    bad = tmp_path / "bad.gguf"
+    bad.write_bytes(b"JUNK" + struct.pack("<I", 3))
+    monkeypatch.setattr(engine, "resolve_binary", lambda binary=None: "fake-binary")
+    binding = BindingPlan(numa_node=0, cpus=[], enforced=False, prefix=[], notes=[])
+    result = engine.run(_decision(), binding, prompt="x", output_tokens=16, model_path=str(bad))
+    assert result.simulated is False
+    assert result.exit_code == 2
+    assert "not a GGUF file" in result.message
+
+
+def test_run_attaches_gguf_metadata_on_success(monkeypatch, tmp_path):
+    """Successful real run should attach parsed GGUF metadata to the result."""
+    import struct as _struct
+
+    # Build a minimal valid GGUF v3 file
+    buf = b"GGUF" + _struct.pack("<I", 3) + _struct.pack("<Q", 0) + _struct.pack("<Q", 0)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(buf)
+
+    class FakeProc:
+        pid = 42
+        returncode = 0
+
+        def communicate(self, timeout=None):
+            return (
+                "llama_print_timings:        eval time =   1000.00 ms /   64 runs   (   15.62 ms per token,    64.00 tokens per second)\n",
+                "",
+            )
+
+    monkeypatch.setattr(engine, "resolve_binary", lambda binary=None: "fake-binary")
+    monkeypatch.setattr(engine.subprocess, "Popen", lambda *a, **kw: FakeProc())
+    binding = BindingPlan(numa_node=0, cpus=[], enforced=False, prefix=[], notes=[])
+    result = engine.run(_decision(), binding, prompt="x", output_tokens=64, model_path=str(model))
+    assert result.exit_code == 0
+    assert result.gguf_metadata is not None
+    assert result.gguf_metadata.version == 3
 
 
 def test_failed_real_subprocess_does_not_report_throughput(monkeypatch):
